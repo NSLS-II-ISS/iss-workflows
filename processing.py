@@ -491,7 +491,7 @@ def process_run(ref):
 #     logger.info("All tasks completed")
 
 def processing_flow(ref):
-    df, md = process_run(ref)
+    md, df = process_run(ref)
     md['TESTING'] = 'TESTING'
     tiled_client_sandbox.write_dataframe(df, md)
     print("uploading works!")
