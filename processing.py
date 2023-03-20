@@ -479,7 +479,10 @@ def process_run(ref):
     #     f"Now we have the full uid: {full_uid}, we can do something with it"
     # )
     print(f"Now we have the full uid: {full_uid}, we can do something with it")
-    get_processed_df_from_uid(run)
+    md, df = get_processed_df_from_uid(run)
+    md['TESTING'] = 'TESTING'
+    tiled_client_sandbox.write_dataframe(df, md)
+    print("uploading works!")
     # logger.info(
     #     f"processing math works!"
     # )
@@ -491,10 +494,9 @@ def process_run(ref):
 #     logger.info("All tasks completed")
 
 def processing_flow(ref):
-    md, df = process_run(ref)
-    md['TESTING'] = 'TESTING'
-    tiled_client_sandbox.write_dataframe(df, md)
-    print("uploading works!")
+    process_run(ref)
+
+
 
 
 # with Flow("processing") as flow:
