@@ -491,7 +491,11 @@ def process_run(ref):
 #     logger.info("All tasks completed")
 
 def processing_flow(ref):
-    process_run(ref)
+    df, md = process_run(ref)
+    md['TESTING'] = 'TESTING'
+    tiled_client_sandbox.write_dataframe(df, md)
+    print("uploading works!")
+
 
 # with Flow("processing") as flow:
 #     # We use ref because we can pass in an index, a scan_id,
