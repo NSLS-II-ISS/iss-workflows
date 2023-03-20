@@ -480,7 +480,9 @@ def process_run(ref):
     # )
     print(f"Now we have the full uid: {full_uid}, we can do something with it")
     md, df = get_processed_df_from_uid(run)
+    md = dict(md)
     md['TESTING'] = 'TESTING'
+    md['summary'].pop('datetime')
     tiled_client_sandbox.write_dataframe(df, md)
     print("uploading works!")
     # logger.info(
