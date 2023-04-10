@@ -19,56 +19,7 @@ tiled_client_sandbox = tiled_client["sandbox"]
 # logger = prefect.context.get("logger")
 
 
-def load_dataset_from_tiled(run, stream_name):
-    t = run[stream_name]['data'][stream_name].read()
-    arr = np.array(t.tolist()).squeeze()
-    columns = list(t.dtype.fields.keys())
-    return pd.DataFrame(arr, columns=columns)
-
-
-def load_apb_dataset_from_tiled(run):
-    apb_dataset = load_dataset_from_tiled(run, 'apb_stream')
-    apb_dataset = apb_dataset[apb_dataset['timestamp'] > 1]
-    ch_offsets = get_ch_properties(run.metadata['start'], 'ch',
-                                   '_offset') * 1e3  # offsets are ib mV but the readings are in uV
-    ch_gains = get_ch_properties(run.metadata['start'], 'ch', '_amp_gain')
-
-    apb_dataset.iloc[:, 1:] -= ch_offsets
-    apb_dataset.iloc[:, 1:] /= 1e6
-    apb_dataset.iloc[:, 1:] /= (10 ** ch_gains)
-
-    energy_dataset = load_dataset_from_tiled(run, 'pb9_enc1')
-    energy_dataset = energy_dataset[energy_dataset['ts_s'] > 0]
-    angle_offset = -float(run.metadata['start']['angle_offset'])
-
-    return apb_dataset, energy_dataset, angle_offset
-
-
-def get_ch_properties(hdr_start, start, end):
-    ch_keys = [key for key in hdr_start.keys() if key.startswith(start) and key.endswith(end)]
-    return np.array([hdr_start[key] for key in ch_keys])
-
-
-def translate_apb_dataset(apb_dataset, energy_dataset, angle_offset, ):
-    data_dict = {}
-    for column in apb_dataset.columns:
-        if column != 'timestamp':
-            adc = pd.DataFrame()
-            adc['timestamp'] = apb_dataset['timestamp']
-            adc['adc'] = apb_dataset[column]
-
-            data_dict[column] = adc
-
-    energy = pd.DataFrame()
-    energy['timestamp'] = energy_dataset['ts_s'] + 1e-9 * energy_dataset['ts_ns']
-    enc = energy_dataset['encoder'].apply(lambda x: int(x) if int(x) <= 0 else -(int(x) ^ 0xffffff - 1))
-
-    energy['encoder'] = encoder2energy(enc, 360000, angle_offset)
-
-    data_dict['energy'] = energy
-    return data_dict
-
-
+# x-ray conversion stuff
 def find_e0(md):
     e0 = -1
     if 'e0' in md['start']:
@@ -182,27 +133,212 @@ def energy2angle(energy, offset=0):
     return np.degrees(np.arcsin(-12398.42 / (2 * 3.1356 * energy))) - float(offset)
 
 
-def interpolate(dataset, key_base=None, sort=True):
-    interpolated_dataset = {}
-    min_timestamp = max([dataset.get(key).iloc[0, 0] for key in dataset])
-    max_timestamp = min([dataset.get(key).iloc[len(dataset.get(key)) - 1, 0] for key in
-                         dataset if len(dataset.get(key).iloc[:, 0]) > 5])
+
+# the main function
+
+def get_processed_df_from_uid(run):
+    md = run.metadata
+
+    experiment = md['start']['experiment']
+    e0 = find_e0(md)
+    data_kind = 'default'
+    stream_names = run.metadata['summary']['stream_names']
+
+    if experiment == 'fly_scan':
+        apb_df = load_apb_dataset_from_tiled(run)
+        energy_df = load_hhm_encoder_dataset_from_tiled(run)
+
+        apb_dict = translate_dataset(apb_df)
+        energy_dict = translate_dataset(energy_df, columns='energy')
+
+        raw_dict = {**apb_dict, **energy_dict}
+
+        interpolated_df = interpolate(raw_dict)
+
+        # for stream_name in stream_names:
+        #     if stream_name == 'pil100k_stream':
+        #         apb_trigger_pil100k_timestamps = load_apb_trig_dataset_from_db(db, uid, use_fall=True,
+        #                                                                        stream_name='apb_trigger_pil100k')
+        #         pil100k_dict = load_pil100k_dataset_from_db(db, uid, apb_trigger_pil100k_timestamps)
+        #         raw_dict = {**raw_dict, **pil100k_dict}
+        #
+        #     elif stream_name == 'xs_stream':
+        #         apb_trigger_xs_timestamps = load_apb_trig_dataset_from_db(db, uid, stream_name='apb_trigger_xs')
+        #         xs3_dict = load_xs3_dataset_from_db(db, uid, apb_trigger_xs_timestamps)
+        #         raw_dict = {**raw_dict, **xs3_dict}
+
+        # logger.info(f'({ttime.ctime()}) Loading file successful for UID {uid}/{path_to_file}')
+
+        # try:
+        #
+        #     # logger.info(f'({ttime.ctime()}) Interpolation successful for {path_to_file}')
+        #     # if save_interpolated_file:
+        #     #     save_interpolated_df_as_file(path_to_file, interpolated_df, comments)
+        # except Exception as e:
+        #     # logger.info(f'({ttime.ctime()}) Interpolation failed for {path_to_file}')
+        #     raise e
+        #
+        # try:
+        #     if e0 > 0:
+        #         processed_df = rebin(interpolated_df, e0)
+        #         # (path, extension) = os.path.splitext(path_to_file)
+        #         # path_to_file = path + '.dat'
+        #         # logger.info(f'({ttime.ctime()}) Binning successful for {path_to_file}')
+        #
+        #         # if draw_func_interp is not None:
+        #         #     draw_func_interp(interpolated_df)
+        #         # if draw_func_bin is not None:
+        #         #     draw_func_bin(processed_df, path_to_file)
+        #     else:
+        #         print(f'({ttime.ctime()}) Energy E0 is not defined')
+        # except Exception as e:
+        #     # logger.info(f'({ttime.ctime()}) Binning failed for {path_to_file}')
+        #     raise e
+
+        # save_binned_df_as_file(path_to_file, processed_df, comments)
+
+    #
+    # elif (experiment == 'step_scan') or (experiment == 'collect_n_exposures'):
+    #     # path_to_file = validate_file_exists(path_to_file, file_type='interp')
+    #     df = stepscan_remove_offsets(md)
+    #     df = stepscan_normalize_xs(df)
+    #     processed_df = filter_df_by_valid_keys(df)
+    #     # df_processed = combine_xspress3_channels(df)
+    #
+    # else:
+    #     return
+    #
+    # processed_df = combine_xspress3_channels(processed_df)
+
+    # primary_df, extended_data = split_df_data_into_primary_and_extended(processed_df)
+
+    ### WIP
+    # if 'spectrometer' in md['start'].keys():
+    #     if md['start']['spectrometer'] == 'von_hamos':
+    #         pass
+    # extended_data, comments, file_paths = process_von_hamos_scan(primary_df, extended_data, comments, hdr, path_to_file, db=db)
+    # data_kind = 'von_hamos'
+    # file_list = file_paths
+    # save_vh_scan_to_file(path_to_file, vh_scan, comments)
+    # file_list.append(path_to_file)
+    return md, processed_df,  # comments, path_to_file, file_list, data_kind
+
+def process_fly_scan(run):
+
+
+
+
+
+
+# tiled_io
+
+def _load_dataset_from_tiled(run, stream_name):
+    t = run[stream_name]['data'][stream_name].read()
+    arr = np.array(t.tolist()).squeeze()
+    columns = list(t.dtype.fields.keys())
+    return arr, columns
+
+def load_dataset_from_tiled(run, stream_name):
+    arr, columns = _load_dataset_from_tiled(run, stream_name)
+    return pd.DataFrame(arr, columns=columns)
+
+def _fix_apb_dataset_from_tiled(run):
+    arr, columns = _load_dataset_from_tiled(run, 'apb_stream')
+    # filter by time
+    t = arr[:, 0]
+    t_min = t[0] - 1e8  # s
+    t_max = 5e9  # Fri Jun 11 04:53:20 2128
+    arr = arr[(t >= t_min) & (t <= t_max), :]
+
+    # filter by amplitude
+    i0_min = -4e6  # uV
+    i0_max = 0.5e6  # uV
+    i0 = arr[:, 1]
+    arr = arr[(i0 >= i0_min) & (i0 <= i0_max), :]
+
+    # filter by repeating values
+    _, idx_ord = np.unique(arr[:, 0], return_index=True)
+    arr = arr[idx_ord, :]
+    return pd.DataFrame(arr, columns=columns)
+
+def get_ch_properties(hdr_start, start, end):
+    ch_keys = [key for key in hdr_start.keys() if key.startswith(start) and key.endswith(end)]
+    return np.array([hdr_start[key] for key in ch_keys])
+
+def load_apb_dataset_from_tiled(run):
+    # apb_dataset = load_dataset_from_tiled(run, 'apb_stream')
+    apb_dataset = _fix_apb_dataset_from_tiled(run) # bandaid to deal with analogue pizzabox tiled readout
+    ch_offsets = get_ch_properties(run.metadata['start'], 'ch', '_offset') * 1e3  # offsets are ib mV but the readings are in uV
+    ch_gains = get_ch_properties(run.metadata['start'], 'ch', '_amp_gain')
+
+    apb_dataset.iloc[:, 1:] -= ch_offsets
+    apb_dataset.iloc[:, 1:] /= 1e6
+    apb_dataset.iloc[:, 1:] /= (10 ** ch_gains)
+
+    return apb_dataset
+
+def load_hhm_encoder_dataset_from_tiled(run):
+    hhm_dataset = load_dataset_from_tiled(run, 'pb9_enc1')
+    hhm_dataset = hhm_dataset[hhm_dataset['ts_s'] > 0]
+    angle_offset = -float(run.metadata['start']['angle_offset'])
+
+    hhm_dataset['timestamp'] = hhm_dataset['ts_s'] + 1e-9 * hhm_dataset['ts_ns']
+    hhm_dataset['encoder'] = hhm_dataset['encoder'].apply(lambda x: int(x) if int(x) <= 0 else -(int(x) ^ 0xffffff - 1))
+    hhm_dataset['energy'] = encoder2energy(hhm_dataset['encoder'] , 360000, angle_offset)
+
+    return hhm_dataset
+
+
+def translate_dataset(df, columns=None):
+    if columns is None:
+        columns = [c for c in df.columns if c!='timestamp']
+    data_dict = {}
+    for column in columns:
+        data_dict[column] = df[['timestamp', column]]
+    return data_dict
+
+
+
+
+
+# def translate_apb_dataset(apb_dataset, energy_dataset, angle_offset, ):
+#     data_dict = {}
+#     for column in apb_dataset.columns:
+#         if column != 'timestamp':
+#             adc = pd.DataFrame()
+#             adc['timestamp'] = apb_dataset['timestamp']
+#             adc['adc'] = apb_dataset[column]
+#
+#             data_dict[column] = adc
+#
+#     energy = pd.DataFrame()
+#     energy['timestamp'] = energy_dataset['ts_s'] + 1e-9 * energy_dataset['ts_ns']
+#     enc = energy_dataset['encoder'].apply(lambda x: int(x) if int(x) <= 0 else -(int(x) ^ 0xffffff - 1))
+#
+#     energy['encoder'] = encoder2energy(enc, 360000, angle_offset)
+#
+#     data_dict['energy'] = energy
+#     return data_dict
+
+def derive_common_timestamp_grid(dataset, key_base=None):
+    min_timestamp = max([df['timestamp'].min() for key, df in dataset.items()])
+    max_timestamp = min([df['timestamp'].max() for key, df in dataset.items()])
+
     if key_base is None:
         all_keys = []
         time_step = []
-        for key in dataset.keys():
+        for key, df in dataset.items():
             all_keys.append(key)
-            time_step.append(np.mean(np.diff(dataset[key].timestamp)))
+            time_step.append(np.median(np.diff(df.timestamp)))
         key_base = all_keys[np.argmax(time_step)]
-    timestamps = dataset[key_base].iloc[:, 0]
+    timestamps = dataset[key_base].timestamp.values
 
-    condition = timestamps < min_timestamp
-    timestamps = timestamps[np.sum(condition):]
+    return timestamps[(timestamps >= min_timestamp) & (timestamps <= max_timestamp)]
 
-    condition = timestamps > max_timestamp
-    timestamps = timestamps[: (len(timestamps) - np.sum(condition) - 1)]
 
-    interpolated_dataset['timestamp'] = timestamps.values
+
+def interpolate(dataset, key_base=None, sort=True):
+    interpolated_dataset = {'timestamp': derive_common_timestamp_grid(dataset, key_base=key_base)}
 
     for key in dataset.keys():
         time = dataset.get(key).iloc[:, 0].values
@@ -365,99 +501,6 @@ def rebin(interpolated_dataset, e0, edge_start=-30, edge_end=50, preedge_spacing
     print(f'({ttime.ctime()}) Binning the data: DONE')
     return binned_df
 
-
-def get_processed_df_from_uid(run, save_interpolated_file=False):
-    md = run.metadata
-
-    experiment = md['start']['experiment']
-
-    # comments = create_file_header(hdr)
-    # path_to_file = hdr.start['interp_filename']
-    # path_to_file = _shift_root(path_to_file)
-    # validate_path_exists(path_to_file)
-    # path_to_file = validate_file_exists(path_to_file, file_type='interp')
-    e0 = find_e0(md)
-    data_kind = 'default'
-    # file_list = []
-
-    if experiment == 'fly_scan':
-
-        # path_to_file = validate_file_exists(path_to_file, file_type='interp')
-        stream_names = list(run.keys())
-        try:
-            # default detectors
-            apb_df, energy_df, energy_offset = load_apb_dataset_from_tiled(run)
-            raw_dict = translate_apb_dataset(apb_df, energy_df, energy_offset)
-
-            # for stream_name in stream_names:
-            #     if stream_name == 'pil100k_stream':
-            #         apb_trigger_pil100k_timestamps = load_apb_trig_dataset_from_db(db, uid, use_fall=True,
-            #                                                                        stream_name='apb_trigger_pil100k')
-            #         pil100k_dict = load_pil100k_dataset_from_db(db, uid, apb_trigger_pil100k_timestamps)
-            #         raw_dict = {**raw_dict, **pil100k_dict}
-            #
-            #     elif stream_name == 'xs_stream':
-            #         apb_trigger_xs_timestamps = load_apb_trig_dataset_from_db(db, uid, stream_name='apb_trigger_xs')
-            #         xs3_dict = load_xs3_dataset_from_db(db, uid, apb_trigger_xs_timestamps)
-            #         raw_dict = {**raw_dict, **xs3_dict}
-
-            # logger.info(f'({ttime.ctime()}) Loading file successful for UID {uid}/{path_to_file}')
-        except Exception as e:
-            # logger.info(f'({ttime.ctime()}) Loading file failed for UID {uid}/{path_to_file}')
-            raise e
-        try:
-            interpolated_df = interpolate(raw_dict)
-            # logger.info(f'({ttime.ctime()}) Interpolation successful for {path_to_file}')
-            # if save_interpolated_file:
-            #     save_interpolated_df_as_file(path_to_file, interpolated_df, comments)
-        except Exception as e:
-            # logger.info(f'({ttime.ctime()}) Interpolation failed for {path_to_file}')
-            raise e
-
-        try:
-            if e0 > 0:
-                processed_df = rebin(interpolated_df, e0)
-                # (path, extension) = os.path.splitext(path_to_file)
-                # path_to_file = path + '.dat'
-                # logger.info(f'({ttime.ctime()}) Binning successful for {path_to_file}')
-
-                # if draw_func_interp is not None:
-                #     draw_func_interp(interpolated_df)
-                # if draw_func_bin is not None:
-                #     draw_func_bin(processed_df, path_to_file)
-            else:
-                print(f'({ttime.ctime()}) Energy E0 is not defined')
-        except Exception as e:
-            # logger.info(f'({ttime.ctime()}) Binning failed for {path_to_file}')
-            raise e
-
-        # save_binned_df_as_file(path_to_file, processed_df, comments)
-
-    #
-    # elif (experiment == 'step_scan') or (experiment == 'collect_n_exposures'):
-    #     # path_to_file = validate_file_exists(path_to_file, file_type='interp')
-    #     df = stepscan_remove_offsets(md)
-    #     df = stepscan_normalize_xs(df)
-    #     processed_df = filter_df_by_valid_keys(df)
-    #     # df_processed = combine_xspress3_channels(df)
-    #
-    # else:
-    #     return
-    #
-    # processed_df = combine_xspress3_channels(processed_df)
-
-    # primary_df, extended_data = split_df_data_into_primary_and_extended(processed_df)
-
-    ### WIP
-    # if 'spectrometer' in md['start'].keys():
-    #     if md['start']['spectrometer'] == 'von_hamos':
-    #         pass
-    # extended_data, comments, file_paths = process_von_hamos_scan(primary_df, extended_data, comments, hdr, path_to_file, db=db)
-    # data_kind = 'von_hamos'
-    # file_list = file_paths
-    # save_vh_scan_to_file(path_to_file, vh_scan, comments)
-    # file_list.append(path_to_file)
-    return md, processed_df,  # comments, path_to_file, file_list, data_kind
 
 
 # @task
