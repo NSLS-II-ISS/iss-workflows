@@ -224,7 +224,7 @@ def get_processed_df_from_uid(run):
     return md, processed_df,  # comments, path_to_file, file_list, data_kind
 
 def process_fly_scan(run):
-
+    pass
 
 
 
@@ -335,22 +335,36 @@ def derive_common_timestamp_grid(dataset, key_base=None):
 
     return timestamps[(timestamps >= min_timestamp) & (timestamps <= max_timestamp)]
 
+def bins_to_edges(x):
+    diff_x = np.diff(x)
+    first_point = x[0] - diff_x[0]/2
+    middle_points = x[:-1] + diff_x / 2
+    last_point = x[-1] + diff_x[-1] / 2
+    return np.hstack((first_point, middle_points, last_point))
 
 
 def interpolate(dataset, key_base=None, sort=True):
-    interpolated_dataset = {'timestamp': derive_common_timestamp_grid(dataset, key_base=key_base)}
+    timestamp = derive_common_timestamp_grid(dataset, key_base=key_base)
+    interpolated_dataset = pd.DataFrame({'timestamp': timestamp})
 
-    for key in dataset.keys():
-        time = dataset.get(key).iloc[:, 0].values
-        val = dataset.get(key).iloc[:, 1].values
-        if len(dataset.get(key).iloc[:, 0]) > 5 * len(timestamps):
-            time = [time[0]] + [np.mean(array) for array in np.array_split(time[1:-1], len(timestamps))] + [time[-1]]
-            val = [val[0]] + [np.mean(array) for array in np.array_split(val[1:-1], len(timestamps))] + [val[-1]]
+    timestamp_edges = bins_to_edges(timestamp)
+
+    for key, df in dataset.items():
+        # time = df.timestamp.values
+        # val = df[key].values
+        df['timestamp_bin'] = pd.cut(df['timestamp'], bins=timestamp_edges, labels=timestamp)
+        df_mean = df.groupby('timestamp_bin').mean(numeric_only=False)
+        interpolated_dataset[key] = df_mean[key]
+        # time = df_mean['timestamp'].values
+        # val_interp = df_mean[key].values
+        # if len(dataset.get(key).iloc[:, 0]) > 5 * len(timestamp):
+        #     time = [time[0]] + [np.mean(array) for array in np.array_split(time[1:-1], len(timestamp))] + [time[-1]]
+        #     val = [val[0]] + [np.mean(array) for array in np.array_split(val[1:-1], len(timestamp))] + [val[-1]]
             # interpolated_dataset[key] = np.array([timestamps, np.interp(timestamps, time, val)]).transpose()
 
         # interpolated_dataset[key] = np.array([timestamps, np.interp(timestamps, time, val)]).transpose()
-        interpolator_func = interp1d(time, np.array([v for v in val]), axis=0)
-        val_interp = interpolator_func(timestamps)
+        # interpolator_func = interp1d(time, val, axis=0)
+        # val_interp = interpolator_func(timestamp)
         if len(val_interp.shape) == 1:
             interpolated_dataset[key] = val_interp
         else:
