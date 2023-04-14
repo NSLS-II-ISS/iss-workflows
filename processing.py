@@ -1,7 +1,7 @@
-from tiled.client import from_profile
-
 import prefect
 from prefect import task, Flow, Parameter
+
+from tiled.client import from_profile
 
 import time as ttime
 import numpy as np
@@ -9,6 +9,7 @@ import pandas as pd
 from scipy.interpolate import interp1d
 import xraydb
 import numexpr as ne
+import copy
 
 tiled_client = from_profile("nsls2", username=None)["iss"]
 tiled_client_iss = tiled_client["raw"]
@@ -137,35 +138,16 @@ def energy2angle(energy, offset=0):
 # the main function
 
 def get_processed_df_from_uid(run):
-    md = run.metadata
-
-    experiment = md['start']['experiment']
-    e0 = find_e0(md)
-    data_kind = 'default'
-    stream_names = run.metadata['summary']['stream_names']
-
+    # experiment = run.metadata['start']['experiment']
+    md = get_processed_md(run.metadata)
+    experiment = md['experiment']
     if experiment == 'fly_scan':
-        apb_df = load_apb_dataset_from_tiled(run)
-        energy_df = load_hhm_encoder_dataset_from_tiled(run)
+        processed_df, processed_md = process_fly_scan(run, md)
 
-        apb_dict = translate_dataset(apb_df)
-        energy_dict = translate_dataset(energy_df, columns='energy')
+    elif (experiment == 'step_scan') or (experiment == 'collect_n_exposures'):
+        pass
 
-        raw_dict = {**apb_dict, **energy_dict}
-
-        interpolated_df = interpolate(raw_dict)
-
-        # for stream_name in stream_names:
-        #     if stream_name == 'pil100k_stream':
-        #         apb_trigger_pil100k_timestamps = load_apb_trig_dataset_from_db(db, uid, use_fall=True,
-        #                                                                        stream_name='apb_trigger_pil100k')
-        #         pil100k_dict = load_pil100k_dataset_from_db(db, uid, apb_trigger_pil100k_timestamps)
-        #         raw_dict = {**raw_dict, **pil100k_dict}
-        #
-        #     elif stream_name == 'xs_stream':
-        #         apb_trigger_xs_timestamps = load_apb_trig_dataset_from_db(db, uid, stream_name='apb_trigger_xs')
-        #         xs3_dict = load_xs3_dataset_from_db(db, uid, apb_trigger_xs_timestamps)
-        #         raw_dict = {**raw_dict, **xs3_dict}
+    # processed_df = combine_xspress3_channels(processed_df)
 
         # logger.info(f'({ttime.ctime()}) Loading file successful for UID {uid}/{path_to_file}')
 
@@ -223,23 +205,126 @@ def get_processed_df_from_uid(run):
     # file_list.append(path_to_file)
     return md, processed_df,  # comments, path_to_file, file_list, data_kind
 
-def process_fly_scan(run):
-    pass
+def process_fly_scan(run, md):
+    apb_df = load_apb_dataset_from_tiled(run)
+    energy_df = load_hhm_encoder_dataset_from_tiled(run)
+
+    apb_dict = translate_dataset(apb_df)
+    energy_dict = translate_dataset(energy_df, columns=['energy'])
+
+    raw_dict = {**apb_dict, **energy_dict}
+
+    for stream_name in run.metadata['summary']['stream_names']:
+        if stream_name == 'pil100k_stream':
+            pil100k_df = load_pil100k_dataset_from_tiled(run)
+            pil100k_dict = translate_dataset(pil100k_df)
+            raw_dict = {**raw_dict, **pil100k_dict}
+    #
+    #     elif stream_name == 'xs_stream':
+    #         apb_trigger_xs_timestamps = load_apb_trig_dataset_from_db(db, uid, stream_name='apb_trigger_xs')
+    #         xs3_dict = load_xs3_dataset_from_db(db, uid, apb_trigger_xs_timestamps)
+    #         raw_dict = {**raw_dict, **xs3_dict}
+
+    interpolated_df = interpolate(raw_dict)
+    interpolated_md = copy.deepcopy(md)
+    interpolated_md['processing_step'] = 'interpolated'
+    # upload interpolated data
+
+    e0 = md['e0']
+    rebinned_df = rebin(interpolated_df, e0)
+    rebinned_md = copy.deepcopy(md)
+    rebinned_md['processing_step'] = 'rebinned'
+    return rebinned_df, rebinned_md
 
 
+# metadata transformations
 
+def get_processed_md(run_metadata):
+    md = copy.deepcopy(run_metadata['start'])
+
+    md['time_start'] = md.pop('time')
+    md['time_stop'] = run_metadata['stop']['time']
+    md['time_duration'] = md['time_stop'] - md['time_start']
+    md['time'] = (md['time_stop'] + md['time_start']) / 2
+
+    md['proposal'] = md.pop('PROPOSAL')
+    md['exit_status'] = run_metadata['stop']['exit_status']
+
+    if 'scan_kind' not in md.keys():
+        md['scan_kind'] = infer_scan_kind(md)
+
+    return md
+
+
+def infer_scan_kind(md):
+    experiment = md['experiment']
+    spectrometer_is_used = ('spectrometer' in md.keys())
+    if spectrometer_is_used:
+        if ((md['experiment'] == 'step_scan') and
+            (md['spectrometer'] == 'johann') and
+            ('spectrometer_energy_steps' in md.keys()) and
+            (len(md['spectrometer_energy_steps']) > 1)):
+            mono_is_moving = False
+        else:
+            mono_is_moving = True
+    else:
+        mono_is_moving = (experiment != 'collect_n_exposures_plan')
+
+    if spectrometer_is_used:
+        spectrometer_is_vonhamos = (md['spectrometer'] == 'von_hamos')
+        if (not spectrometer_is_vonhamos):
+            try:
+                spectrometer_is_moving = (md['spectrometer_config']['scan_type'] != 'constant energy')
+            except KeyError:
+                try:
+                    spectrometer_is_moving = ('spectrometer_energy_steps' in md.keys()) & (len(md['spectrometer_energy_steps']) > 1)
+                except KeyError:
+                    spectrometer_is_moving = False
+        else:
+            spectrometer_is_moving = False
+    else:  # redundant but why not
+        spectrometer_is_moving = False
+        spectrometer_is_vonhamos = False
+
+    if mono_is_moving:
+        if (not spectrometer_is_used):
+            scan_kind = 'xas'
+        else:
+            if spectrometer_is_moving:  # only johann can move together with mono
+                scan_kind = 'johann_rixs'
+            else:
+                if spectrometer_is_vonhamos:
+                    scan_kind = 'von_hamos_rixs'
+                else:
+                    scan_kind = 'johann_herfd'
+    else:
+        if (not spectrometer_is_used):
+            scan_kind = 'constant_e'
+        else:
+            if spectrometer_is_moving:
+                scan_kind = 'johann_xes'
+            else:
+                if spectrometer_is_vonhamos:
+                    scan_kind = 'von_hamos_xes'
+                else:
+                    scan_kind = 'constant_e_johann'
+    return scan_kind
 
 
 # tiled_io
 
-def _load_dataset_from_tiled(run, stream_name):
-    t = run[stream_name]['data'][stream_name].read()
+def _load_dataset_from_tiled(run, stream_name, field_name=None):
+    if field_name is None:
+        t = run[stream_name]['data'][stream_name].read()
+        columns = list(t.dtype.fields.keys())
+    else:
+        t = run[stream_name]['data'][field_name].read()
+        columns = [field_name]
     arr = np.array(t.tolist()).squeeze()
-    columns = list(t.dtype.fields.keys())
     return arr, columns
 
-def load_dataset_from_tiled(run, stream_name):
-    arr, columns = _load_dataset_from_tiled(run, stream_name)
+def load_dataset_from_tiled(run, stream_name, field_name=None):
+    arr, columns = _load_dataset_from_tiled(run, stream_name, field_name=field_name)
     return pd.DataFrame(arr, columns=columns)
 
 def _fix_apb_dataset_from_tiled(run):
@@ -275,6 +360,10 @@ def load_apb_dataset_from_tiled(run):
     apb_dataset.iloc[:, 1:] /= 1e6
     apb_dataset.iloc[:, 1:] /= (10 ** ch_gains)
 
+    apb_dataset['mutrans'] = -np.log(apb_dataset['it'] / apb_dataset['i0'])
+    apb_dataset['murefer'] = -np.log(apb_dataset['ir'] / apb_dataset['it'])
+    apb_dataset['mufluor'] = apb_dataset['iff'] / apb_dataset['i0']
+
     return apb_dataset
 
 def load_hhm_encoder_dataset_from_tiled(run):
@@ -288,6 +377,66 @@ def load_hhm_encoder_dataset_from_tiled(run):
 
     return hhm_dataset
 
+def _load_apb_trig_dataset_from_tiled(run, stream_name='apb_trigger_xs'):
+    df = load_dataset_from_tiled(run, stream_name)
+    df = df[df['timestamp'] > 1e8]
+    timestamps = df.timestamp.values
+    transitions = df.transition.values
+
+    if transitions[0] == 0:
+        timestamps = timestamps[1:]
+        transitions = transitions[1:]
+    rises = timestamps[0::2]
+    falls = timestamps[1::2]
+    n_0 = np.sum(transitions == 0)
+    n_1 = np.sum(transitions == 1)
+    n_all = np.min([n_0, n_1])
+    apb_trig_timestamps = (rises[:n_all] + falls[:n_all]) / 2
+    return apb_trig_timestamps
+
+
+def _load_pil100k_dataset_from_tiled(run):#, apb_trig_timestamps):
+    field_names = ['pil100k_roi1', 'pil100k_roi2', 'pil100k_roi3', 'pil100k_roi4', 'pil100k_image']
+    data = {}
+    for field_name in field_names:
+        arr, columns = _load_dataset_from_tiled(run, 'pil100k_stream', field_name)
+        column = columns[0]
+        data[column] = [v for v in arr]
+    return pd.DataFrame(data)
+
+def load_pil100k_dataset_from_tiled(run):
+    timestamp = _load_apb_trig_dataset_from_tiled(run, stream_name='apb_trigger_pil100k')
+    df = _load_pil100k_dataset_from_tiled(run)
+
+    n_pulses = timestamp.size
+    n_images = len(df)
+    n = np.min([n_pulses, n_images])
+
+    df = df.iloc[:n, :]
+    timestamp = timestamp[:n]
+    df['timestamp'] = timestamp
+
+    return df
+
+
+
+
+    # output = {}
+    # # t = hdr.table(stream_name='pil100k_stream', fill=True)
+    # field_list = ['pil100k_roi1', 'pil100k_roi2', 'pil100k_roi3', 'pil100k_roi4']#, 'pil100k_image']
+    # _t = {field : list(hdr.data(stream_name='pil100k_stream', field=field))[0] for field in field_list}
+    # if load_images:
+    #     _t['pil100k_image'] = [i for i in list(hdr.data(stream_name='pil100k_stream', field='pil100k_image'))[0]]
+    # t = pd.DataFrame(_t)
+    # # n_images = t.shape[0]
+    # n_images = min(t['pil100k_roi1'].size, apb_trig_timestamps.size)
+    # pil100k_timestamps = apb_trig_timestamps[:n_images]
+    # keys = [k for k in t.keys() if (k != 'time') ]#and (k != 'pil100k_image')]
+    # t = t[:n_images]
+    # for j, key in enumerate(keys):
+    #     output[key] = pd.DataFrame(np.vstack((pil100k_timestamps, t[key])).T, columns=['timestamp', f'{key}'])
+    # return output
+
 
 def translate_dataset(df, columns=None):
     if columns is None:
@@ -296,29 +445,6 @@ def translate_dataset(df, columns=None):
     for column in columns:
         data_dict[column] = df[['timestamp', column]]
     return data_dict
-
-
-
-
-
-# def translate_apb_dataset(apb_dataset, energy_dataset, angle_offset, ):
-#     data_dict = {}
-#     for column in apb_dataset.columns:
-#         if column != 'timestamp':
-#             adc = pd.DataFrame()
-#             adc['timestamp'] = apb_dataset['timestamp']
-#             adc['adc'] = apb_dataset[column]
-#
-#             data_dict[column] = adc
-#
-#     energy = pd.DataFrame()
-#     energy['timestamp'] = energy_dataset['ts_s'] + 1e-9 * energy_dataset['ts_ns']
-#     enc = energy_dataset['encoder'].apply(lambda x: int(x) if int(x) <= 0 else -(int(x) ^ 0xffffff - 1))
-#
-#     energy['encoder'] = encoder2energy(enc, 360000, angle_offset)
-#
-#     data_dict['energy'] = energy
-#     return data_dict
 
 def derive_common_timestamp_grid(dataset, key_base=None):
     min_timestamp = max([df['timestamp'].min() for key, df in dataset.items()])
@@ -335,52 +461,28 @@ def derive_common_timestamp_grid(dataset, key_base=None):
 
     return timestamps[(timestamps >= min_timestamp) & (timestamps <= max_timestamp)]
 
-def bins_to_edges(x):
-    diff_x = np.diff(x)
-    first_point = x[0] - diff_x[0]/2
-    middle_points = x[:-1] + diff_x / 2
-    last_point = x[-1] + diff_x[-1] / 2
-    return np.hstack((first_point, middle_points, last_point))
 
-
-def interpolate(dataset, key_base=None, sort=True):
+def interpolate(dataset, key_base = None, sort=True):
     timestamp = derive_common_timestamp_grid(dataset, key_base=key_base)
-    interpolated_dataset = pd.DataFrame({'timestamp': timestamp})
 
-    timestamp_edges = bins_to_edges(timestamp)
+    interpolated_dataset = {'timestamp': timestamp}
+    # interpolated_dataset['timestamp'] = timestamp
 
     for key, df in dataset.items():
-        # time = df.timestamp.values
-        # val = df[key].values
-        df['timestamp_bin'] = pd.cut(df['timestamp'], bins=timestamp_edges, labels=timestamp)
-        df_mean = df.groupby('timestamp_bin').mean(numeric_only=False)
-        interpolated_dataset[key] = df_mean[key]
-        # time = df_mean['timestamp'].values
-        # val_interp = df_mean[key].values
-        # if len(dataset.get(key).iloc[:, 0]) > 5 * len(timestamp):
-        #     time = [time[0]] + [np.mean(array) for array in np.array_split(time[1:-1], len(timestamp))] + [time[-1]]
-        #     val = [val[0]] + [np.mean(array) for array in np.array_split(val[1:-1], len(timestamp))] + [val[-1]]
-            # interpolated_dataset[key] = np.array([timestamps, np.interp(timestamps, time, val)]).transpose()
+        time = df['timestamp'].values
+        val = df[key].values
+        if time.size > 5 * len(timestamp):
+            time = [time[0]] + [np.mean(array) for array in np.array_split(time[1:-1], len(timestamp))] + [time[-1]]
+            val = [val[0]] + [np.mean(array) for array in np.array_split(val[1:-1], len(timestamp))] + [val[-1]]
 
-        # interpolated_dataset[key] = np.array([timestamps, np.interp(timestamps, time, val)]).transpose()
-        # interpolator_func = interp1d(time, val, axis=0)
-        # val_interp = interpolator_func(timestamp)
+        interpolator_func = interp1d(time, np.array([v for v in val]), axis=0)
+        val_interp = interpolator_func(timestamp)
         if len(val_interp.shape) == 1:
             interpolated_dataset[key] = val_interp
         else:
             interpolated_dataset[key] = [v for v in val_interp]
 
     intepolated_dataframe = pd.DataFrame(interpolated_dataset)
-    # intepolated_dataframe = pd.DataFrame(np.vstack((timestamps, np.array([interpolated_dataset[key][:, 1] for
-    #                                                                         key in interpolated_dataset.keys()]))).transpose())
-    # keys = ['timestamp']
-    # keys.extend(interpolated_dataset.keys())
-    # intepolated_dataframe.columns = keys
-
-    # intepolated_dataframe['mu_t'] = np.log( intepolated_dataframe['i0'] / intepolated_dataframe['it'] )
-    # intepolated_dataframe['mu_f'] = intepolated_dataframe['iff'] / intepolated_dataframe['i0']
-    # intepolated_dataframe['mu_r'] = np.log( intepolated_dataframe['it'] / intepolated_dataframe['ir'] )
-
     if sort:
         return intepolated_dataframe.sort_values('energy')
     else:
@@ -511,7 +613,7 @@ def rebin(interpolated_dataset, e0, edge_start=-30, edge_end=50, preedge_spacing
                     ret[k] = [i for i in data_conv]
 
         binned_df = pd.DataFrame(ret)
-    binned_df = binned_df.drop('timestamp', 1)
+    # binned_df = binned_df.drop('timestamp', axis=1)
     print(f'({ttime.ctime()}) Binning the data: DONE')
     return binned_df
 
