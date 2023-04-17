@@ -1,4 +1,6 @@
 import numpy as np
+import xraydb
+
 
 def k2e(k, E0):
     """

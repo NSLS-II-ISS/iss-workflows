@@ -2,21 +2,15 @@
 # from prefect import task, Flow, Parameter
 
 from tiled.client import from_profile
-from tiled_io import load_apb_dataset_from_tiled, load_hhm_encoder_dataset_from_tiled, load_pil100k_dataset_from_tiled, translate_dataset
-
-from metadata import get_processed_md
-from interpolate import interpolate
-from rebin import rebin
-
-
-
 import time as ttime
 import numpy as np
 import pandas as pd
-
-import xraydb
-
 import copy
+
+from tiled_io import load_apb_dataset_from_tiled, load_hhm_encoder_dataset_from_tiled, load_pil100k_dataset_from_tiled, translate_dataset
+from metadata import get_processed_md
+from interpolate import interpolate
+from rebin import rebin
 
 tiled_client = from_profile("nsls2", username=None)["iss"]
 tiled_client_iss = tiled_client["raw"]
@@ -171,7 +165,7 @@ def processing_flow(ref):
 #     except:
 #         print(f'{uid} could not be processed')
 
-process_run('9fca69cd-bf38-41f3-bc5b-e7a25ccb8ee8')
+# process_run('9fca69cd-bf38-41f3-bc5b-e7a25ccb8ee8')
 
 # with Flow("processing") as flow:
 #     # We use ref because we can pass in an index, a scan_id,
