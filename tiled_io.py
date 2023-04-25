@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from quality import check_apb_quality
 from xray import *
-
+from itertools import product
 
 def _load_dataset_from_tiled(run, stream_name, field_name=None):
     if field_name is None:
@@ -101,20 +101,33 @@ def _load_pil100k_dataset_from_tiled(run):#, apb_trig_timestamps):
         data[column] = [v for v in arr]
     return pd.DataFrame(data)
 
-def load_pil100k_dataset_from_tiled(run):
-    timestamp = _load_apb_trig_dataset_from_tiled(run, stream_name='apb_trigger_pil100k')
-    df = _load_pil100k_dataset_from_tiled(run)
-
+def _merge_trigger_and_detector_data(df, timestamp):
     n_pulses = timestamp.size
     n_images = len(df)
     n = np.min([n_pulses, n_images])
-
     df = df.iloc[:n, :]
     timestamp = timestamp[:n]
     df['timestamp'] = timestamp
-
     return df
 
+def load_pil100k_dataset_from_tiled(run):
+    timestamp = _load_apb_trig_dataset_from_tiled(run, stream_name='apb_trigger_pil100k')
+    df = _load_pil100k_dataset_from_tiled(run)
+    return _merge_trigger_and_detector_data(df, timestamp)
+
+def _load_xs_dataset_from_tiled(run):
+    field_names = [f'xs_ch{ch_i:02d}_roi{roi_i:02d}' for ch_i, roi_i in product([1, 2, 3, 4], [1, 2, 3, 4])]
+    data = {}
+    for field_name in field_names:
+        arr, columns = _load_dataset_from_tiled(run, 'xs_stream', field_name)
+        column = columns[0]
+        data[column] = [v for v in arr]
+    return pd.DataFrame(data)
+
+def load_xs_dataset_from_tiled(run):
+    timestamp = _load_apb_trig_dataset_from_tiled(run, stream_name='apb_trigger_xs')
+    df = _load_xs_dataset_from_tiled(run)
+    return _merge_trigger_and_detector_data(df, timestamp)
 
 def translate_dataset(df, columns=None):
     if columns is None:

@@ -7,7 +7,8 @@ import numpy as np
 import pandas as pd
 import copy
 
-from tiled_io import load_apb_dataset_from_tiled, load_hhm_encoder_dataset_from_tiled, load_pil100k_dataset_from_tiled, translate_dataset
+from tiled_io import (load_apb_dataset_from_tiled, load_hhm_encoder_dataset_from_tiled,\
+                      load_pil100k_dataset_from_tiled, load_xs_dataset_from_tiled, translate_dataset)
 from metadata import get_processed_md
 from interpolate import interpolate
 from rebin import rebin
@@ -106,11 +107,11 @@ def process_fly_scan(run, md):
             pil100k_df = load_pil100k_dataset_from_tiled(run)
             pil100k_dict = translate_dataset(pil100k_df)
             raw_dict = {**raw_dict, **pil100k_dict}
-    #
-    #     elif stream_name == 'xs_stream':
-    #         apb_trigger_xs_timestamps = load_apb_trig_dataset_from_db(db, uid, stream_name='apb_trigger_xs')
-    #         xs3_dict = load_xs3_dataset_from_db(db, uid, apb_trigger_xs_timestamps)
-    #         raw_dict = {**raw_dict, **xs3_dict}
+
+        if stream_name == 'xs_stream':
+            xs_df = load_xs_dataset_from_tiled(run)
+            xs_dict = translate_dataset(xs_df)
+            raw_dict = {**raw_dict, **xs_dict}
 
     interpolated_df = interpolate(raw_dict)
     interpolated_md = copy.deepcopy(md)
