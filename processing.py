@@ -12,6 +12,8 @@ from tiled_io import (load_apb_dataset_from_tiled, load_hhm_encoder_dataset_from
 from metadata import get_processed_md
 from interpolate import interpolate
 from rebin import rebin
+from tiled_io import _xs_ch_roi_keys, _xs_roi_combine_dict, _pil100k_roi_keys
+_external_detector_keys = _xs_ch_roi_keys + list(_xs_roi_combine_dict.keys()) + _pil100k_roi_keys
 
 tiled_client = from_profile("nsls2", username=None)["iss"]
 tiled_client_iss = tiled_client["raw"]
@@ -32,6 +34,11 @@ def get_processed_df_from_uid(run):
 
     elif (experiment == 'step_scan') or (experiment == 'collect_n_exposures'):
         pass
+        # df = stepscan_remove_offsets(hdr)
+        # df = stepscan_normalize_xs(df)
+        # processed_df = filter_df_by_valid_keys(df)
+
+    # processed_df = combine_xspress3_channels(processed_df)
 
     # processed_df = combine_xspress3_channels(processed_df)
 
@@ -109,11 +116,13 @@ def process_fly_scan(run, md):
             raw_dict = {**raw_dict, **pil100k_dict}
 
         if stream_name == 'xs_stream':
-            xs_df = load_xs_dataset_from_tiled(run)
+            xs_df, xs_quality_dict = load_xs_dataset_from_tiled(run, i0_quality=apb_quality_dict['i0'])
             xs_dict = translate_dataset(xs_df)
             raw_dict = {**raw_dict, **xs_dict}
+            md['scan_quality'] = {**md['scan_quality'], **xs_quality_dict}
 
     interpolated_df = interpolate(raw_dict)
+    interpolated_df = normalize_external_detectors_by_i0(interpolated_df)
     interpolated_md = copy.deepcopy(md)
     interpolated_md['processing_step'] = 'interpolated'
     # upload interpolated data
@@ -124,6 +133,15 @@ def process_fly_scan(run, md):
     rebinned_md['processing_step'] = 'rebinned'
     return rebinned_df, rebinned_md
 
+
+
+def normalize_external_detectors_by_i0(df):
+    i0 = df['i0'].values
+    i0 /= np.median(i0)
+    for key in _external_detector_keys:
+        if key in df.keys():
+            df[key] = df[key] / i0
+    return df
 
 
 # @task

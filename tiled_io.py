@@ -1,8 +1,16 @@
 import numpy as np
 import pandas as pd
-from quality import check_apb_quality
+from quality import check_apb_quality#, check_xs_quality
 from xray import *
 from itertools import product
+
+_xs_ch_range = list(range(1, 5))
+_xs_roi_range = list(range(1, 5))
+_xs_ch_roi_keys = [f'xs_ch{ch_i:02d}_roi{roi_i:02d}' for ch_i, roi_i in product(_xs_ch_range, _xs_roi_range)]
+_xs_roi_combine_dict = {f'xs_roi{roi_i:02d}': [f'xs_ch{ch_i:02d}_roi{roi_i:02d}' for ch_i in _xs_ch_range] for roi_i in _xs_roi_range}
+
+_pil_roi_range = list(range(1, 5))
+_pil100k_roi_keys = [f'pil100k_roi{roi_i:01d}' for roi_i in _pil_roi_range]
 
 def _load_dataset_from_tiled(run, stream_name, field_name=None):
     if field_name is None:
@@ -88,8 +96,9 @@ def _load_apb_trig_dataset_from_tiled(run, stream_name='apb_trigger_xs'):
     n_0 = np.sum(transitions == 0)
     n_1 = np.sum(transitions == 1)
     n_all = np.min([n_0, n_1])
+    apb_trig_durations = falls[:n_all] - rises[:n_all]
     apb_trig_timestamps = (rises[:n_all] + falls[:n_all]) / 2
-    return apb_trig_timestamps
+    return apb_trig_timestamps, apb_trig_durations
 
 
 def _load_pil100k_dataset_from_tiled(run):#, apb_trig_timestamps):
@@ -101,19 +110,21 @@ def _load_pil100k_dataset_from_tiled(run):#, apb_trig_timestamps):
         data[column] = [v for v in arr]
     return pd.DataFrame(data)
 
-def _merge_trigger_and_detector_data(df, timestamp):
+def _merge_trigger_and_detector_data(df, timestamp, exposure_time):
     n_pulses = timestamp.size
     n_images = len(df)
     n = np.min([n_pulses, n_images])
     df = df.iloc[:n, :]
     timestamp = timestamp[:n]
+    exposure_time = exposure_time[:n]
     df['timestamp'] = timestamp
+    df['exposure_time'] = exposure_time
     return df
 
 def load_pil100k_dataset_from_tiled(run):
-    timestamp = _load_apb_trig_dataset_from_tiled(run, stream_name='apb_trigger_pil100k')
+    timestamp, exposure_time = _load_apb_trig_dataset_from_tiled(run, stream_name='apb_trigger_pil100k')
     df = _load_pil100k_dataset_from_tiled(run)
-    return _merge_trigger_and_detector_data(df, timestamp)
+    return _merge_trigger_and_detector_data(df, timestamp, exposure_time)
 
 def _load_xs_dataset_from_tiled(run):
     field_names = [f'xs_ch{ch_i:02d}_roi{roi_i:02d}' for ch_i, roi_i in product([1, 2, 3, 4], [1, 2, 3, 4])]
@@ -124,10 +135,20 @@ def _load_xs_dataset_from_tiled(run):
         data[column] = [v for v in arr]
     return pd.DataFrame(data)
 
-def load_xs_dataset_from_tiled(run):
-    timestamp = _load_apb_trig_dataset_from_tiled(run, stream_name='apb_trigger_xs')
-    df = _load_xs_dataset_from_tiled(run)
-    return _merge_trigger_and_detector_data(df, timestamp)
+def _combine_xs_channels(df):
+    for combined, list_to_be_combined in _xs_roi_combine_dict.items():
+        df[combined] = df[list_to_be_combined].mean(axis=1)
+    return df
+def load_xs_dataset_from_tiled(run, check_scan=True, i0_quality=None):
+    timestamp, exposure_time = _load_apb_trig_dataset_from_tiled(run, stream_name='apb_trigger_xs')
+    xs_dataset_raw = _load_xs_dataset_from_tiled(run)
+    xs_dataset_raw = _combine_xs_channels(xs_dataset_raw)
+    xs_dataset = _merge_trigger_and_detector_data(xs_dataset_raw, timestamp, exposure_time)
+    if check_scan:
+        quality_dict = check_xs_quality(xs_dataset, i0_quality=i0_quality)
+    else:
+        quality_dict = None
+    return xs_dataset, quality_dict
 
 def translate_dataset(df, columns=None):
     if columns is None:

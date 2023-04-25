@@ -73,7 +73,15 @@ def check_apb_quality(df_mV: pd.DataFrame):# , md: dict):
     unsaturated_currents = check_saturation(df_mV)
     good_amp_currents = check_amplitude(df_mV)
     valid_mu = check_mu_values(df_mV, good_amp_currents)
-    mu_good = {mu: 'good' for mu in ["mut", "muf", "mur"]}  # default all False
+    mu_good = {mu: 'good' for mu in ["mut", "muf", "mur"]}  # default all good
+
+    for k in unsaturated_currents.keys():
+        mu_good[k] = 'good'
+        if not unsaturated_currents[k]:
+            mu_good[k] = 'saturated'
+        if not good_amp_currents[k]:
+            mu_good[k] = 'low_amplitude'
+
     if good_amp_currents["i0"] and unsaturated_currents["i0"]:
         if unsaturated_currents["it"]:
             mu_good["mut"] = 'good' if valid_mu["mut"] else 'invalid_values'
@@ -98,4 +106,15 @@ def check_apb_quality(df_mV: pd.DataFrame):# , md: dict):
             mu_good["mur"] = 'low_amplitude'
         if (not unsaturated_currents["it"]) or (not unsaturated_currents["ir"]):
             mu_good["mur"] = 'saturated'
+    return mu_good
+
+def check_xs_quality(df, total_roi_idx=4, threshold=450e3, i0_quality=None):
+    channels = [f'xs_ch{ch_i:02d}_roi{total_roi_idx:02d}' for ch_i in [1, 2, 3, 4]]
+    mu_good = {mu: 'good' for mu in [f'xs_ch{ch_i:02d}' for ch_i in [1, 2, 3, 4]]}  # default all False
+    for mu_channel, data_key in zip(mu_good.keys(), channels):
+        intensities = df[data_key].values / df['exposure_time']
+        mu_good[mu_channel] = 'good' if np.all(intensities <= threshold) else 'saturated'
+        if i0_quality is not None:
+            if (i0_quality != 'good') and (mu_good[mu_channel] == 'good'):
+                mu_good[mu_channel] = i0_quality
     return mu_good
