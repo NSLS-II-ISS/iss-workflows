@@ -22,5 +22,5 @@ def read_all_streams(uid, beamline_acronym):
 
 
 @flow
-def general_data_validation(uid):
+def data_validation(uid):
     read_all_streams(uid, beamline_acronym="iss")
