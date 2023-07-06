@@ -7,10 +7,12 @@ def get_processed_md(run_metadata):
     md['time_stop'] = run_metadata['stop']['time']
     md['time_duration'] = md['time_stop'] - md['time']
     # md['time'] = (md['time_stop'] + md['time_start']) / 2
-
-    md['proposal'] = md.pop('PROPOSAL')
+    if 'PROPOSAL' in md.keys():
+        md['proposal'] = md.pop('PROPOSAL')
+    else:
+        md['proposal'] = md.pop('proposal')
     md['exit_status'] = run_metadata['stop']['exit_status']
-
+#
     if 'scan_kind' not in md.keys():
         md['scan_kind'] = infer_scan_kind(md)
 

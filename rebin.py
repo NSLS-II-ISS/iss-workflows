@@ -99,6 +99,7 @@ def rebin(interpolated_dataset, e0, edge_start=-30, edge_end=50, preedge_spacing
         n = len(binned_df.columns)
         binned_df.insert(n, col.name, col)
         binned_df = binned_df.sort_values('energy')
+        convo_mat = None
     else:
         print(f'({ttime.ctime()}) Binning the data: BEGIN')
         if xanes_spacing == -1:
@@ -130,4 +131,4 @@ def rebin(interpolated_dataset, e0, edge_start=-30, edge_end=50, preedge_spacing
         binned_df = pd.DataFrame(ret)
     # binned_df = binned_df.drop('timestamp', axis=1)
     print(f'({ttime.ctime()}) Binning the data: DONE')
-    return binned_df
+    return binned_df, convo_mat
