@@ -1,5 +1,4 @@
-# import prefect
-# from prefect import task, Flow, Parameter
+from prefect import task, flow, get_run_logger
 
 from tiled.client import from_profile
 import time as ttime
@@ -15,13 +14,11 @@ from rebin import rebin
 from tiled_io import _xs_ch_roi_keys, _xs_roi_combine_dict, _pil100k_roi_keys
 _external_detector_keys = _xs_ch_roi_keys + list(_xs_roi_combine_dict.keys()) + _pil100k_roi_keys
 
-# tiled_client = from_profile("nsls2", username=None)["iss"]
-# tiled_client_iss = tiled_client["raw"]
-# tiled_client_sandbox = tiled_client["sandbox"]
+tiled_client = from_profile("nsls2", username=None)["iss"]
+tiled_client_iss = tiled_client["raw"]
+tiled_client_sandbox = tiled_client["sandbox"]
 
 
-# Used for Prefect logging.
-# logger = prefect.context.get("logger")
 
 
 
@@ -168,18 +165,21 @@ def normalize_external_detectors_by_i0(df):
 #     return full_uid
 
 
-# @task
+@task
 def process_run(ref):
+    logger = get_run_logger()
     run = tiled_client_iss[ref]
     full_uid = run.start["uid"]
-    # logger.info(
-    #     f"Now we have the full uid: {full_uid}, we can do something with it"
-    # )
+    logger.info(
+        f"Now we have the full uid: {full_uid}, we can do something with it"
+    )
     md, df = get_processed_df_from_uid(run)
-    # tiled_client_sandbox.write_dataframe(df, md)
-    # logger.info(
-    #     f"processing math works!"
-    # )
+    md['tag'] = 'prefect testing'
+
+    # tiled_client_sandbox.write_dataframe(df, metadata=md)
+    logger.info(
+        f"processing math works!"
+    )
 
 
 
@@ -187,6 +187,7 @@ def process_run(ref):
 # def wait_for_all_tasks():
 #     logger.info("All tasks completed")
 
+@flow
 def processing_flow(ref):
     process_run(ref)
 

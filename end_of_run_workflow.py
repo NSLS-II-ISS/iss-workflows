@@ -9,7 +9,7 @@ def log_completion():
 
 
 @flow
-def end_of_workflow(stop_doc):
+def end_of_run_workflow(stop_doc):
     uid = stop_doc["run_start"]
     data_validation(uid)
     log_completion()
