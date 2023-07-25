@@ -176,7 +176,7 @@ def process_run(ref):
     md, df = get_processed_df_from_uid(run)
     md['tag'] = 'prefect testing'
 
-    # tiled_client_sandbox.write_dataframe(df, metadata=md)
+    tiled_client_sandbox.write_dataframe(df, metadata=md)
     logger.info(
         f"processing math works!"
     )
