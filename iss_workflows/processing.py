@@ -6,26 +6,19 @@ import numpy as np
 import pandas as pd
 import copy
 
-from tiled_io import (load_apb_dataset_from_tiled, load_hhm_encoder_dataset_from_tiled,\
+from iss_workflows.tiled_io import (load_apb_dataset_from_tiled, load_hhm_encoder_dataset_from_tiled,\
                       load_pil100k_dataset_from_tiled, load_xs_dataset_from_tiled, translate_dataset)
-from metadata import get_processed_md
-from interpolate import interpolate
-from rebin import rebin
-from tiled_io import _xs_ch_roi_keys, _xs_roi_combine_dict, _pil100k_roi_keys
+from iss_workflows.metadata import get_processed_md
+from iss_workflows.interpolate import interpolate
+from iss_workflows.rebin import rebin
+from iss_workflows.tiled_io import _xs_ch_roi_keys, _xs_roi_combine_dict, _pil100k_roi_keys
 _external_detector_keys = _xs_ch_roi_keys + list(_xs_roi_combine_dict.keys()) + _pil100k_roi_keys
 
-tiled_client = from_profile("nsls2", username=None)["iss"]
-tiled_client_iss = tiled_client["raw"]
-tiled_client_sandbox = tiled_client["sandbox"]
 
-
-
-
-
-def get_processed_df_from_uid(run):
-    # experiment = run.metadata['start']['experiment']
+def get_processed_df_from_run(run):
     md = get_processed_md(run.metadata)
     experiment = md['experiment']
+
     if experiment == 'fly_scan':
         processed_df, processed_md = process_fly_scan(run, md)
 
@@ -35,14 +28,7 @@ def get_processed_df_from_uid(run):
         # df = stepscan_normalize_xs(df)
         # processed_df = filter_df_by_valid_keys(df)
 
-    # processed_df = combine_xspress3_channels(processed_df)
 
-    # processed_df = combine_xspress3_channels(processed_df)
-
-        # logger.info(f'({ttime.ctime()}) Loading file successful for UID {uid}/{path_to_file}')
-
-        # try:
-        #
         #     # logger.info(f'({ttime.ctime()}) Interpolation successful for {path_to_file}')
         #     # if save_interpolated_file:
         #     #     save_interpolated_df_as_file(path_to_file, interpolated_df, comments)
@@ -96,28 +82,33 @@ def get_processed_df_from_uid(run):
     return md, processed_df,  # comments, path_to_file, file_list, data_kind
 
 def read_fly_scan_streams(run, md):
-    apb_df, apb_quality_dict = load_apb_dataset_from_tiled(run)
-    md['scan_quality'] = apb_quality_dict
-    energy_df = load_hhm_encoder_dataset_from_tiled(run)
-
-    apb_dict = translate_dataset(apb_df)
-    energy_dict = translate_dataset(energy_df, columns=['energy'])
-
-    raw_dict = {**apb_dict, **energy_dict}
+    raw_dict = {}
 
     for stream_name in run.metadata['summary']['stream_names']:
-        if stream_name == 'pil100k_stream':
+        if stream_name == 'apb_stream':
+            apb_df, apb_quality_dict = load_apb_dataset_from_tiled(run)
+            apb_dict = translate_dataset(apb_df)
+            raw_dict = {**raw_dict, **apb_dict}
+            md['scan_quality'] = apb_quality_dict
+
+        elif stream_name == 'pb9_enc1':
+            energy_df = load_hhm_encoder_dataset_from_tiled(run)
+            energy_dict = translate_dataset(energy_df, columns=['energy'])
+            raw_dict = {**raw_dict, **energy_dict}
+
+        elif stream_name == 'pil100k_stream':
             pil100k_df = load_pil100k_dataset_from_tiled(run)
             pil100k_dict = translate_dataset(pil100k_df)
             raw_dict = {**raw_dict, **pil100k_dict}
 
-        if stream_name == 'xs_stream':
+        elif stream_name == 'xs_stream':
             xs_df, xs_quality_dict = load_xs_dataset_from_tiled(run, i0_quality=apb_quality_dict['i0'])
             xs_dict = translate_dataset(xs_df)
             raw_dict = {**raw_dict, **xs_dict}
             md['scan_quality'] = {**md['scan_quality'], **xs_quality_dict}
 
     return raw_dict, md
+
 
 def interpolate_fly_scan_raw_dict(raw_dict, md):
     interpolated_df = interpolate(raw_dict)
@@ -138,9 +129,21 @@ def rebin_fly_scan_interpolated_df(interpolated_df, md, return_convo_mat=False):
         return rebinned_df, rebinned_md
 
 def process_fly_scan(run, md):
-    raw_dict, md = read_fly_scan_streams(run, md)
-    interpolated_df, interpolated_md = interpolate_fly_scan_raw_dict(raw_dict, md)
-    rebinned_df, rebinned_md = rebin_fly_scan_interpolated_df(interpolated_df, md)
+    try:
+        raw_dict, md = read_fly_scan_streams(run, md)
+    except Exception as e:
+        raise Exception(f'[Processing] Failed to load the data for {md["uid"]}.\nReason: {e}')
+
+    try:
+        interpolated_df, interpolated_md = interpolate_fly_scan_raw_dict(raw_dict, md)
+    except Exception as e:
+        raise Exception(f'[Processing] Failed to interpolate the data for {md["uid"]}.\nReason: {e}')
+
+    try:
+        rebinned_df, rebinned_md = rebin_fly_scan_interpolated_df(interpolated_df, md)
+    except Exception as e:
+        raise Exception(f'[Processing] Failed to rebin the data for {md["uid"]}.\nReason: {e}')
+
     return rebinned_df, rebinned_md
 
 
@@ -154,26 +157,20 @@ def normalize_external_detectors_by_i0(df):
     return df
 
 
-# @task
-# def log_uid(ref):
-#     run = tiled_client_iss[ref]
-#     full_uid = run.start["uid"]
-#     # logger.info(f"{full_uid = }")
-#     print(f"{full_uid = }")
-
-#     # Returns work like normal.
-#     return full_uid
-
 
 @task
 def process_run(ref):
+    tiled_client = from_profile("nsls2", username=None)["iss"]
+    tiled_client_iss = tiled_client["raw"]
+    tiled_client_sandbox = tiled_client["sandbox"]
+
     logger = get_run_logger()
     run = tiled_client_iss[ref]
     full_uid = run.start["uid"]
     logger.info(
         f"Now we have the full uid: {full_uid}, we can do something with it"
     )
-    md, df = get_processed_df_from_uid(run)
+    md, df = get_processed_df_from_run(run)
     md['tag'] = 'prefect testing'
 
     tiled_client_sandbox.write_dataframe(df, metadata=md)
@@ -181,29 +178,6 @@ def process_run(ref):
         f"processing math works!"
     )
 
-
-
-# @task
-# def wait_for_all_tasks():
-#     logger.info("All tasks completed")
-
 @flow
 def processing_flow(ref):
     process_run(ref)
-
-# for uid in tiled_client_iss.search(Key('PROPOSAL') == '310173').search(Key('year') == '2023').search(Key('experiment') == 'fly_scan'):
-#     print(uid)
-#     try:
-#         process_run(uid)
-#     except:
-#         print(f'{uid} could not be processed')
-
-# process_run('9fca69cd-bf38-41f3-bc5b-e7a25ccb8ee8')
-
-# with Flow("processing") as flow:
-#     # We use ref because we can pass in an index, a scan_id,
-#     # or a uid in the UI.
-#     ref = Parameter("ref")
-#     full_uid = log_uid(ref)
-#     process_run_task = process_run(full_uid)
-#     wait_for_all_tasks(upstream_tasks=[process_run_task])

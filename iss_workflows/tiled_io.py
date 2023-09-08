@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
-from quality import check_apb_quality#, check_xs_quality
-from xray import *
+from iss_workflows.quality import check_apb_quality, check_xs_quality
+from iss_workflows.xray import *
 from itertools import product
 
 _xs_ch_range = list(range(1, 5))

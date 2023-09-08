@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import time as ttime
-from xray import *
+from iss_workflows.xray import *
 import numexpr as ne
 
 def get_transition_grid(dE_start, dE_end, E_range, round_up=True):
