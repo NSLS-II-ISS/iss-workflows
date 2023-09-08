@@ -23,52 +23,14 @@ def get_processed_df_from_run(run):
         processed_df, processed_md = process_fly_scan(run, md)
 
     elif (experiment == 'step_scan') or (experiment == 'collect_n_exposures'):
-        pass
+        raise Exception('step_scan and count processing is not implemented yet!')
+        # pass
         # df = stepscan_remove_offsets(hdr)
         # df = stepscan_normalize_xs(df)
         # processed_df = filter_df_by_valid_keys(df)
 
 
-        #     # logger.info(f'({ttime.ctime()}) Interpolation successful for {path_to_file}')
-        #     # if save_interpolated_file:
-        #     #     save_interpolated_df_as_file(path_to_file, interpolated_df, comments)
-        # except Exception as e:
-        #     # logger.info(f'({ttime.ctime()}) Interpolation failed for {path_to_file}')
-        #     raise e
-        #
-        # try:
-        #     if e0 > 0:
-        #         processed_df = rebin(interpolated_df, e0)
-        #         # (path, extension) = os.path.splitext(path_to_file)
-        #         # path_to_file = path + '.dat'
-        #         # logger.info(f'({ttime.ctime()}) Binning successful for {path_to_file}')
-        #
-        #         # if draw_func_interp is not None:
-        #         #     draw_func_interp(interpolated_df)
-        #         # if draw_func_bin is not None:
-        #         #     draw_func_bin(processed_df, path_to_file)
-        #     else:
-        #         print(f'({ttime.ctime()}) Energy E0 is not defined')
-        # except Exception as e:
-        #     # logger.info(f'({ttime.ctime()}) Binning failed for {path_to_file}')
-        #     raise e
 
-        # save_binned_df_as_file(path_to_file, processed_df, comments)
-
-    #
-    # elif (experiment == 'step_scan') or (experiment == 'collect_n_exposures'):
-    #     # path_to_file = validate_file_exists(path_to_file, file_type='interp')
-    #     df = stepscan_remove_offsets(md)
-    #     df = stepscan_normalize_xs(df)
-    #     processed_df = filter_df_by_valid_keys(df)
-    #     # df_processed = combine_xspress3_channels(df)
-    #
-    # else:
-    #     return
-    #
-    # processed_df = combine_xspress3_channels(processed_df)
-
-    # primary_df, extended_data = split_df_data_into_primary_and_extended(processed_df)
 
     ### WIP
     # if 'spectrometer' in md['start'].keys():
