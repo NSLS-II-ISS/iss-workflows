@@ -14,7 +14,7 @@ from rebin import rebin
 from tiled_io import _xs_ch_roi_keys, _xs_roi_combine_dict, _pil100k_roi_keys
 _external_detector_keys = _xs_ch_roi_keys + list(_xs_roi_combine_dict.keys()) + _pil100k_roi_keys
 
-tiled_client = from_profile("nsls2", username=None)["iss"]
+tiled_client = from_profile("nsls2")["iss"]
 tiled_client_iss = tiled_client["raw"]
 tiled_client_sandbox = tiled_client["sandbox"]
 
