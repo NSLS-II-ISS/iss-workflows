@@ -101,11 +101,12 @@ def _load_apb_trig_dataset_from_tiled(run, stream_name='apb_trigger_xs'):
     return apb_trig_timestamps, apb_trig_durations
 
 
-def _load_pil100k_dataset_from_tiled(run):#, apb_trig_timestamps):
-    field_names = ['pil100k_roi1', 'pil100k_roi2', 'pil100k_roi3', 'pil100k_roi4', 'pil100k_image']
+def _load_pil100k_dataset_from_tiled(run, pil_name='pil100k'):#, apb_trig_timestamps):
+    field_names = [f'{pil_name}_roi1', f'{pil_name}_roi2', f'{pil_name}_roi3', f'{pil_name}_roi4',
+                   f'{pil_name}_image']
     data = {}
     for field_name in field_names:
-        arr, columns = _load_dataset_from_tiled(run, 'pil100k_stream', field_name)
+        arr, columns = _load_dataset_from_tiled(run, f'{pil_name}_stream', field_name)
         column = columns[0]
         data[column] = [v for v in arr]
     return pd.DataFrame(data)
@@ -121,9 +122,9 @@ def _merge_trigger_and_detector_data(df, timestamp, exposure_time):
     df['exposure_time'] = exposure_time
     return df
 
-def load_pil100k_dataset_from_tiled(run):
-    timestamp, exposure_time = _load_apb_trig_dataset_from_tiled(run, stream_name='apb_trigger_pil100k')
-    df = _load_pil100k_dataset_from_tiled(run)
+def load_pil100k_dataset_from_tiled(run, pil_name='pil100k'):
+    timestamp, exposure_time = _load_apb_trig_dataset_from_tiled(run, stream_name=f'apb_trigger_{pil_name}')
+    df = _load_pil100k_dataset_from_tiled(run, pil_name=pil_name)
     return _merge_trigger_and_detector_data(df, timestamp, exposure_time)
 
 def _load_xs_dataset_from_tiled(run):
