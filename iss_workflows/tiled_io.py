@@ -12,6 +12,8 @@ _xs_roi_combine_dict = {f'xs_roi{roi_i:02d}': [f'xs_ch{ch_i:02d}_roi{roi_i:02d}'
 _pil_roi_range = list(range(1, 5))
 _pil100k_roi_keys = [f'pil100k_roi{roi_i:01d}' for roi_i in _pil_roi_range]
 
+_external_detector_keys = _xs_ch_roi_keys + list(_xs_roi_combine_dict.keys()) + _pil100k_roi_keys
+
 def _load_dataset_from_tiled(run, stream_name, field_name=None):
     if field_name is None:
         t = run[stream_name]['data'][stream_name].read()

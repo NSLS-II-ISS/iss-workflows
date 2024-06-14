@@ -11,8 +11,8 @@ from iss_workflows.tiled_io import (load_apb_dataset_from_tiled, load_hhm_encode
 from iss_workflows.metadata import get_processed_md
 from iss_workflows.interpolate import interpolate
 from iss_workflows.rebin import rebin
-from iss_workflows.tiled_io import _xs_ch_roi_keys, _xs_roi_combine_dict, _pil100k_roi_keys
-_external_detector_keys = _xs_ch_roi_keys + list(_xs_roi_combine_dict.keys()) + _pil100k_roi_keys
+from iss_workflows.tiled_io import _external_detector_keys
+
 
 try:
     from prefect import get_run_logger
@@ -28,11 +28,15 @@ tiled_client_sandbox = tiled_client["sandbox"]
 def logger_info_decorator(function):
     def wrapper(*args, logger_msg='', **kwargs):
         if LOGGER is not None:
-            print(f"{LOGGER}: {logger_msg}: beginning")
-        result = function(*args, **kwargs)
-        if LOGGER is not None:
-            print(f"{LOGGER}: {logger_msg}: complete")
-        return result
+            LOGGER.info(f"{logger_msg}: beginning")
+        try:
+            result = function(*args, **kwargs)
+            if LOGGER is not None:
+                LOGGER.info(f"{logger_msg}: beginning")
+            return result
+        except Exception as e:
+            LOGGER.info(f"{logger_msg}: FAILED. Reason: {e}")
+            raise e
     return wrapper
 
 @logger_info_decorator
@@ -47,12 +51,10 @@ def get_processed_df_from_run(run,
         processed_df, processed_md = process_fly_scan(run, md, draw_func_interp=draw_func_interp)
 
     elif (experiment == 'step_scan') or (experiment == 'collect_n_exposures'):
-        raise Exception('step_scan and count processing is not implemented yet!')
-        # pass
-        # df = stepscan_remove_offsets(hdr)
-        # df = stepscan_normalize_xs(df)
-        # processed_df = filter_df_by_valid_keys(df)
+        process_step_scan(run, md)
 
+    elif experiment == 'epics_fly_scan':
+        process_epics_fly_scan(run, md)
 
 
 
@@ -67,11 +69,17 @@ def get_processed_df_from_run(run,
     # file_list.append(path_to_file)
     return processed_df, md  # comments, path_to_file, file_list, data_kind
 
-
+@logger_info_decorator
 def read_fly_scan_streams(run, md):
     raw_dict = {}
 
-    for stream_name in run.metadata['summary']['stream_names']:
+    # make sure that apb_stream is the first stream to be processed
+    stream_names = [s for s in run.metadata['summary']['stream_names']] # paranoia
+    if 'apb_stream' in stream_names:
+        stream_names.remove('apb_stream')
+        stream_names = ['apb_stream'] + stream_names
+
+    for stream_name in stream_names:
         if stream_name == 'apb_stream':
             apb_df, apb_quality_dict = load_apb_dataset_from_tiled(run)
             apb_dict = translate_dataset(apb_df)
@@ -97,15 +105,16 @@ def read_fly_scan_streams(run, md):
 
     return raw_dict, md
 
-
+@logger_info_decorator
 def interpolate_fly_scan_raw_dict(raw_dict, md):
     interpolated_df = interpolate(raw_dict)
-    interpolated_df = normalize_external_detectors_by_i0(interpolated_df)
+    # interpolated_df = normalize_external_detectors_by_i0(interpolated_df)
     interpolated_md = copy.deepcopy(md)
     interpolated_md['processing_step'] = 'interpolated'
     # upload interpolated data
     return interpolated_df, interpolated_md
 
+@logger_info_decorator
 def rebin_fly_scan_interpolated_df(interpolated_df, md, return_convo_mat=False):
     e0 = md['e0']
     rebinned_df, convo_mat = rebin(interpolated_df, e0)
@@ -117,26 +126,25 @@ def rebin_fly_scan_interpolated_df(interpolated_df, md, return_convo_mat=False):
         return rebinned_df, rebinned_md
 
 def process_fly_scan(run, md, draw_func_interp=None):
-    try:
-        raw_dict, md = read_fly_scan_streams(run, md)
-    except Exception as e:
-        raise Exception(f'[Processing] Failed to load the data for {md["uid"]}.\nReason: {e}')
-
-    try:
-        interpolated_df, interpolated_md = interpolate_fly_scan_raw_dict(raw_dict, md)
-        if draw_func_interp is not None:
-            draw_func_interp(interpolated_df)
-    except Exception as e:
-        raise Exception(f'[Processing] Failed to interpolate the data for {md["uid"]}.\nReason: {e}')
-
-    try:
-        rebinned_df, rebinned_md = rebin_fly_scan_interpolated_df(interpolated_df, md)
-    except Exception as e:
-        raise Exception(f'[Processing] Failed to rebin the data for {md["uid"]}.\nReason: {e}')
-
+    raw_dict, md = read_fly_scan_streams(run, md,
+                                         logger_msg='\t Loading fly data streams')
+    interpolated_df, interpolated_md = interpolate_fly_scan_raw_dict(raw_dict, md,
+                                         logger_msg='\t Interpolating fly data onto a common time grid')
+    if draw_func_interp is not None:
+        draw_func_interp(interpolated_df)
+    rebinned_df, rebinned_md = rebin_fly_scan_interpolated_df(interpolated_df, md,
+                                                              logger_msg='\t Rebinning fly data')
     return rebinned_df, rebinned_md
 
+def process_step_scan(run, md):
+    pass
+    # df = stepscan_remove_offsets(hdr)
+    # df = stepscan_normalize_xs(df)
+    # processed_df = filter_df_by_valid_keys(df)
+    # raise Exception('step_scan and count processing is not implemented yet!')
 
+def process_epics_fly_scan(run, md):
+    pass
 
 def normalize_external_detectors_by_i0(df):
     i0 = df['i0'].values.copy()
@@ -145,19 +153,6 @@ def normalize_external_detectors_by_i0(df):
         if key in df.keys():
             df[key] = df[key] / i0
     return df
-
-
-# def logger_info_decorator(logger, msg):
-#     def _logger_info_decorator_inner(function):
-#         def wrapper(*args, **kwargs):
-#             if logger is not None:
-#                 logger.info(f"{msg}: beginning")
-#             result = function(*args, **kwargs)
-#             if logger is not None:
-#                 logger.info(f"{msg}: complete")
-#             return result
-#         return wrapper
-#     return _logger_info_decorator_inner
 
 
 @logger_info_decorator
