@@ -14,15 +14,26 @@ from iss_workflows.rebin import rebin
 from iss_workflows.tiled_io import _external_detector_keys
 
 
-try:
-    from prefect import get_run_logger
-    LOGGER = get_run_logger()
-except ModuleNotFoundError:
-    LOGGER = None
+LOGGER = None
+def get_prefect_logger():
+    global LOGGER
+    if LOGGER is None:
+        try:
+            from prefect import get_run_logger
+            LOGGER = get_run_logger()
+        except:
+            pass
 
-tiled_client = from_profile("nsls2")["iss"]["raw"]
-tiled_client_iss = tiled_client["raw"]
-tiled_client_sandbox = tiled_client["sandbox"]
+tiled_client_iss = None
+tiled_client_sandbox = None
+def get_tiled_nodes():
+    global tiled_client_iss
+    global tiled_client_sandbox
+    if (tiled_client_iss is None) or (tiled_client_sandbox is None):
+        tiled_client = from_profile("nsls2")["iss"] #["raw"]
+        tiled_client_iss = tiled_client["raw"]
+        tiled_client_sandbox = tiled_client["sandbox"]
+
 
 
 def logger_info_decorator(function):
@@ -160,9 +171,10 @@ def upload_data_to_sandbox(df, md):
     tiled_client_sandbox.write_dataframe(df, metadata=md)
 
 @logger_info_decorator
-def save_data_to_file(df, md):
+def save_data_to_file(df, md, dump_to_tiff=False):
     pass
     return []
+
 @logger_info_decorator
 def dispatch_file_to_cloud(file, cloud_dispatcher):
     pass
@@ -182,6 +194,8 @@ def process_run(uid,
                 dump_to_tiff=False,
                 heavyweight_processing=True,
                 processing_kwargs=None):
+
+    get_tiled_nodes()
 
     run = tiled_client_iss[uid]
     full_uid = run.start["uid"]
@@ -214,7 +228,7 @@ def process_run(uid,
 
 
 def process_run_task(*args, **kwargs):
-
+    get_prefect_logger()
     from prefect import task
     @task
     def _process_run(*args, **kwargs):

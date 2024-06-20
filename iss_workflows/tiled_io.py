@@ -28,8 +28,7 @@ def load_dataset_from_tiled(run, stream_name, field_name=None):
     arr, columns = _load_dataset_from_tiled(run, stream_name, field_name=field_name)
     return pd.DataFrame(arr, columns=columns)
 
-def _fix_apb_dataset_from_tiled(run):
-    arr, columns = _load_dataset_from_tiled(run, 'apb_stream')
+def _fix_apb_dataset_from_tiled(arr):
     # filter by time
     t = arr[:, 0]
     t_min = t[0] - 1e8  # s
@@ -45,15 +44,16 @@ def _fix_apb_dataset_from_tiled(run):
     # filter by repeating values
     _, idx_ord = np.unique(arr[:, 0], return_index=True)
     arr = arr[idx_ord, :]
-    return pd.DataFrame(arr, columns=columns)
+    return arr
 
 def get_ch_properties(hdr_start, start, end):
     ch_keys = [key for key in hdr_start.keys() if key.startswith(start) and key.endswith(end)]
     return np.array([hdr_start[key] for key in ch_keys])
 
 def load_apb_dataset_from_tiled(run, check_scan=True):
-    # apb_dataset = load_dataset_from_tiled(run, 'apb_stream')
-    apb_dataset = _fix_apb_dataset_from_tiled(run) # bandaid to deal with analogue pizzabox tiled readout
+    arr, columns = _load_dataset_from_tiled(run, 'apb_stream')
+    arr = _fix_apb_dataset_from_tiled(arr) # bandaid to deal with analogue pizzabox tiled readout
+    apb_dataset = pd.DataFrame(arr, columns=columns)
 
     if check_scan:
         quality_dict = check_apb_quality(apb_dataset * 1e-3)
