@@ -14,6 +14,11 @@ _pil100k_roi_keys = [f'pil100k_roi{roi_i:01d}' for roi_i in _pil_roi_range]
 
 _external_detector_keys = _xs_ch_roi_keys + list(_xs_roi_combine_dict.keys()) + _pil100k_roi_keys
 
+# def read_tiled_array_in_chunks(arr_client):
+#
+#     for c in arr_client
+
+
 def _load_dataset_from_tiled(run, stream_name, field_name=None):
     if field_name is None:
         t = run[stream_name]['data'][stream_name].read()
