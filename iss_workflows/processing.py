@@ -12,7 +12,7 @@ from iss_workflows.metadata import get_processed_md
 from iss_workflows.interpolate import interpolate
 from iss_workflows.rebin import rebin
 from iss_workflows.tiled_io import _external_detector_keys
-
+from iss_workflows.file_io import write_df_to_file
 
 LOGGER = None
 def get_prefect_logger():
@@ -172,8 +172,10 @@ def upload_data_to_sandbox(df, md):
 
 @logger_info_decorator
 def save_data_to_file(df, md, dump_to_tiff=False):
-    pass
-    return []
+    file = write_df_to_file(df, md)
+    if dump_to_tiff:
+        raise Exception('Saving images to tiff files is not implemented yet')
+    return [file]
 
 @logger_info_decorator
 def dispatch_file_to_cloud(file, cloud_dispatcher):
