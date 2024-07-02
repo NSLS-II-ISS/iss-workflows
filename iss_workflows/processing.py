@@ -172,10 +172,10 @@ def upload_data_to_sandbox(df, md):
 
 @logger_info_decorator
 def save_data_to_file(df, md, dump_to_tiff=False):
-    file = write_df_to_file(df, md)
+    path_to_file = write_df_to_file(df, md)
     if dump_to_tiff:
         raise Exception('Saving images to tiff files is not implemented yet')
-    return [file]
+    return [path_to_file]
 
 @logger_info_decorator
 def dispatch_file_to_cloud(file, cloud_dispatcher):
@@ -208,12 +208,6 @@ def process_run(uid,
                                        draw_func_interp=draw_func_interp,
                                        logger_msg=f'Processing data for {full_uid}')
 
-
-    if send_to_sandbox:
-        upload_data_to_sandbox(df, md,
-                               logger_msg=f'Uploading data to sandbox for {full_uid}')
-
-
     if save_to_file:
         files = save_data_to_file(df, md, dump_to_tiff=dump_to_tiff,
                                   logger_msg=f'Saving data to file for {full_uid}')
@@ -221,6 +215,11 @@ def process_run(uid,
         if cloud_dispatcher is not None:
             dispatch_data_to_cloud(files, cloud_dispatcher,
                                    logger_msg=f'Dispatching files to cloud for {full_uid}')
+
+    if send_to_sandbox:
+        upload_data_to_sandbox(df, md,
+                               logger_msg=f'Uploading data to sandbox for {full_uid}')
+
 
 
     # md['tag'] = 'prefect testing'

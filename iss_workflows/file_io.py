@@ -1,22 +1,8 @@
-from xas.metadata import key_match as md_key_match
+from xas.metadata import create_file_header_from_md
 import os
 from subprocess import call
-from datetime import datetime
 import numpy as np
 
-def create_file_header(md):
-    output = ''
-    for key, hr_key in md_key_match.items():
-        if key in md.keys():
-            value = md[key]
-        elif key == 'stop_time':
-            value = md['time_stop']
-        else:
-            value = 'None'
-        if (key == 'time') or (key == 'stop_time'):
-            value = datetime.fromtimestamp(value).strftime('%m/%d/%Y  %H:%M:%S.%f')
-        output += f'# {hr_key}: {value}\n'
-    return output
 
 def validate_file_exists(path_to_file, file_type = 'interp'):
     """The function checks if the file exists or not. If exists, it adds an index to the file name.
@@ -40,11 +26,10 @@ def validate_file_exists(path_to_file, file_type = 'interp'):
 
 
 def write_df_to_file(df, md):
-    path_to_file, _ = os.path.splitext(md['interp_filename'])
-    path_to_file = path_to_file + '.dat'
-
+    path_to_file = os.path.splitext(md['interp_filename'])[0] + '.dat'
     path_to_file = validate_file_exists(path_to_file)
-    comments = create_file_header(md)
+    md['processed_files'] = [path_to_file]
+    metadata_text = create_file_header(md)
 
     df = df[[c for c in df.columns if df[c].dtype == np.float64]]
 
@@ -59,6 +44,6 @@ def write_df_to_file(df, md):
                fmt=fmt,
                delimiter=" ",
                header=f'# {header}',
-               comments=comments)
+               comments=metadata_text)
     call(['chmod', '774', path_to_file])
-    return path_to_file
+    return [path_to_file]
