@@ -1,4 +1,4 @@
-from xas.metadata import create_file_header_from_md
+from .metadata import create_file_header_from_md
 import os
 from subprocess import call
 import numpy as np
@@ -29,7 +29,7 @@ def write_df_to_file(df, md):
     path_to_file = os.path.splitext(md['interp_filename'])[0] + '.dat'
     path_to_file = validate_file_exists(path_to_file)
     md['processed_files'] = [path_to_file]
-    metadata_text = create_file_header(md)
+    metadata_text = create_file_header_from_md(md)
 
     df = df[[c for c in df.columns if df[c].dtype == np.float64]]
 
