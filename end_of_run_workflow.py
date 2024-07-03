@@ -1,7 +1,7 @@
 from prefect import task, flow, get_run_logger
 from data_validation import data_validation
 
-from processing import processing_flow
+from iss_workflows.processing import processing_flow
 
 @task
 def log_completion():

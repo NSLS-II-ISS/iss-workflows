@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
-from quality import check_apb_quality#, check_xs_quality
-from xray import *
+from iss_workflows.quality import check_apb_quality, check_xs_quality
+from iss_workflows.xray import *
 from itertools import product
 
 _xs_ch_range = list(range(1, 5))
@@ -11,6 +11,13 @@ _xs_roi_combine_dict = {f'xs_roi{roi_i:02d}': [f'xs_ch{ch_i:02d}_roi{roi_i:02d}'
 
 _pil_roi_range = list(range(1, 5))
 _pil100k_roi_keys = [f'pil100k_roi{roi_i:01d}' for roi_i in _pil_roi_range]
+
+_external_detector_keys = _xs_ch_roi_keys + list(_xs_roi_combine_dict.keys()) + _pil100k_roi_keys
+
+# def read_tiled_array_in_chunks(arr_client):
+#
+#     for c in arr_client
+
 
 def _load_dataset_from_tiled(run, stream_name, field_name=None):
     if field_name is None:
@@ -26,8 +33,7 @@ def load_dataset_from_tiled(run, stream_name, field_name=None):
     arr, columns = _load_dataset_from_tiled(run, stream_name, field_name=field_name)
     return pd.DataFrame(arr, columns=columns)
 
-def _fix_apb_dataset_from_tiled(run):
-    arr, columns = _load_dataset_from_tiled(run, 'apb_stream')
+def _fix_apb_dataset_from_tiled(arr):
     # filter by time
     t = arr[:, 0]
     t_min = t[0] - 1e8  # s
@@ -43,15 +49,16 @@ def _fix_apb_dataset_from_tiled(run):
     # filter by repeating values
     _, idx_ord = np.unique(arr[:, 0], return_index=True)
     arr = arr[idx_ord, :]
-    return pd.DataFrame(arr, columns=columns)
+    return arr
 
 def get_ch_properties(hdr_start, start, end):
     ch_keys = [key for key in hdr_start.keys() if key.startswith(start) and key.endswith(end)]
     return np.array([hdr_start[key] for key in ch_keys])
 
 def load_apb_dataset_from_tiled(run, check_scan=True):
-    # apb_dataset = load_dataset_from_tiled(run, 'apb_stream')
-    apb_dataset = _fix_apb_dataset_from_tiled(run) # bandaid to deal with analogue pizzabox tiled readout
+    arr, columns = _load_dataset_from_tiled(run, 'apb_stream')
+    arr = _fix_apb_dataset_from_tiled(arr) # bandaid to deal with analogue pizzabox tiled readout
+    apb_dataset = pd.DataFrame(arr, columns=columns)
 
     if check_scan:
         quality_dict = check_apb_quality(apb_dataset * 1e-3)
@@ -101,11 +108,12 @@ def _load_apb_trig_dataset_from_tiled(run, stream_name='apb_trigger_xs'):
     return apb_trig_timestamps, apb_trig_durations
 
 
-def _load_pil100k_dataset_from_tiled(run):#, apb_trig_timestamps):
-    field_names = ['pil100k_roi1', 'pil100k_roi2', 'pil100k_roi3', 'pil100k_roi4', 'pil100k_image']
+def _load_pil100k_dataset_from_tiled(run, pil_name='pil100k'):#, apb_trig_timestamps):
+    field_names = [f'{pil_name}_roi1', f'{pil_name}_roi2', f'{pil_name}_roi3', f'{pil_name}_roi4',
+                   f'{pil_name}_image']
     data = {}
     for field_name in field_names:
-        arr, columns = _load_dataset_from_tiled(run, 'pil100k_stream', field_name)
+        arr, columns = _load_dataset_from_tiled(run, f'{pil_name}_stream', field_name)
         column = columns[0]
         data[column] = [v for v in arr]
     return pd.DataFrame(data)
@@ -121,9 +129,9 @@ def _merge_trigger_and_detector_data(df, timestamp, exposure_time):
     df['exposure_time'] = exposure_time
     return df
 
-def load_pil100k_dataset_from_tiled(run):
-    timestamp, exposure_time = _load_apb_trig_dataset_from_tiled(run, stream_name='apb_trigger_pil100k')
-    df = _load_pil100k_dataset_from_tiled(run)
+def load_pil100k_dataset_from_tiled(run, pil_name='pil100k'):
+    timestamp, exposure_time = _load_apb_trig_dataset_from_tiled(run, stream_name=f'apb_trigger_{pil_name}')
+    df = _load_pil100k_dataset_from_tiled(run, pil_name=pil_name)
     return _merge_trigger_and_detector_data(df, timestamp, exposure_time)
 
 def _load_xs_dataset_from_tiled(run):
