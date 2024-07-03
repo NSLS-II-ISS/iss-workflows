@@ -108,9 +108,10 @@ def _load_apb_trig_dataset_from_tiled(run, stream_name='apb_trigger_xs'):
     return apb_trig_timestamps, apb_trig_durations
 
 
-def _load_pil100k_dataset_from_tiled(run, pil_name='pil100k'):#, apb_trig_timestamps):
-    field_names = [f'{pil_name}_roi1', f'{pil_name}_roi2', f'{pil_name}_roi3', f'{pil_name}_roi4',
-                   f'{pil_name}_image']
+def _load_pil100k_dataset_from_tiled(run, pil_name='pil100k', heavyweight_processing=True):
+    field_names = [f'{pil_name}_roi1', f'{pil_name}_roi2', f'{pil_name}_roi3', f'{pil_name}_roi4']
+    if heavyweight_processing:
+        field_names.append(f'{pil_name}_image')
     data = {}
     for field_name in field_names:
         arr, columns = _load_dataset_from_tiled(run, f'{pil_name}_stream', field_name)
@@ -129,13 +130,15 @@ def _merge_trigger_and_detector_data(df, timestamp, exposure_time):
     df['exposure_time'] = exposure_time
     return df
 
-def load_pil100k_dataset_from_tiled(run, pil_name='pil100k'):
+def load_pil100k_dataset_from_tiled(run, pil_name='pil100k', heavyweight_processing=True):
     timestamp, exposure_time = _load_apb_trig_dataset_from_tiled(run, stream_name=f'apb_trigger_{pil_name}')
-    df = _load_pil100k_dataset_from_tiled(run, pil_name=pil_name)
+    df = _load_pil100k_dataset_from_tiled(run, pil_name=pil_name, heavyweight_processing=heavyweight_processing)
     return _merge_trigger_and_detector_data(df, timestamp, exposure_time)
 
-def _load_xs_dataset_from_tiled(run):
+def _load_xs_dataset_from_tiled(run, heavyweight_processing=True):
     field_names = [f'xs_ch{ch_i:02d}_roi{roi_i:02d}' for ch_i, roi_i in product([1, 2, 3, 4], [1, 2, 3, 4])]
+    if heavyweight_processing:
+        field_names = field_names + [f'xs_ch{ch_i:02d}_spectrum' for ch_i in range(1, 5)]
     data = {}
     for field_name in field_names:
         arr, columns = _load_dataset_from_tiled(run, 'xs_stream', field_name)
@@ -147,9 +150,9 @@ def _combine_xs_channels(df):
     for combined, list_to_be_combined in _xs_roi_combine_dict.items():
         df[combined] = df[list_to_be_combined].mean(axis=1)
     return df
-def load_xs_dataset_from_tiled(run, check_scan=True, i0_quality=None):
+def load_xs_dataset_from_tiled(run, check_scan=True, i0_quality=None, heavyweight_processing=True):
     timestamp, exposure_time = _load_apb_trig_dataset_from_tiled(run, stream_name='apb_trigger_xs')
-    xs_dataset_raw = _load_xs_dataset_from_tiled(run)
+    xs_dataset_raw = _load_xs_dataset_from_tiled(run, heavyweight_processing=heavyweight_processing)
     xs_dataset_raw = _combine_xs_channels(xs_dataset_raw)
     xs_dataset = _merge_trigger_and_detector_data(xs_dataset_raw, timestamp, exposure_time)
     if check_scan:

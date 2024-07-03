@@ -59,7 +59,7 @@ def get_processed_df_from_run(run,
     experiment = md['experiment']
 
     if experiment == 'fly_scan':
-        processed_df, processed_md = process_fly_scan(run, md, draw_func_interp=draw_func_interp)
+        processed_df, processed_md = process_fly_scan(run, md, draw_func_interp=draw_func_interp, heavyweight_processing=heavyweight_processing)
 
     elif (experiment == 'step_scan') or (experiment == 'collect_n_exposures'):
         process_step_scan(run, md)
@@ -81,7 +81,7 @@ def get_processed_df_from_run(run,
     return processed_df, md  # comments, path_to_file, file_list, data_kind
 
 @logger_info_decorator
-def read_fly_scan_streams(run, md):
+def read_fly_scan_streams(run, md, heavyweight_processing=True):
     raw_dict = {}
 
     # make sure that apb_stream is the first stream to be processed
@@ -104,12 +104,14 @@ def read_fly_scan_streams(run, md):
 
         elif stream_name.startswith('pil100k'):
             pil_name = stream_name.split('_')[0]
-            pil100k_df = load_pil100k_dataset_from_tiled(run, pil_name=pil_name)
+            pil100k_df = load_pil100k_dataset_from_tiled(run, pil_name=pil_name,
+                                                         heavyweight_processing=heavyweight_processing)
             pil100k_dict = translate_dataset(pil100k_df)
             raw_dict = {**raw_dict, **pil100k_dict}
 
         elif stream_name == 'xs_stream':
-            xs_df, xs_quality_dict = load_xs_dataset_from_tiled(run, i0_quality=apb_quality_dict['i0'])
+            xs_df, xs_quality_dict = load_xs_dataset_from_tiled(run, i0_quality=apb_quality_dict['i0'],
+                                                                heavyweight_processing=heavyweight_processing)
             xs_dict = translate_dataset(xs_df)
             raw_dict = {**raw_dict, **xs_dict}
             md['scan_quality'] = {**md['scan_quality'], **xs_quality_dict}
@@ -136,8 +138,8 @@ def rebin_fly_scan_interpolated_df(interpolated_df, md, return_convo_mat=False):
     else:
         return rebinned_df, rebinned_md
 
-def process_fly_scan(run, md, draw_func_interp=None):
-    raw_dict, md = read_fly_scan_streams(run, md,
+def process_fly_scan(run, md, draw_func_interp=None, heavyweight_processing=True):
+    raw_dict, md = read_fly_scan_streams(run, md, heavyweight_processing=heavyweight_processing,
                                          logger_msg='\t Loading fly data streams')
     interpolated_df, interpolated_md = interpolate_fly_scan_raw_dict(raw_dict, md,
                                          logger_msg='\t Interpolating fly data onto a common time grid')
@@ -194,7 +196,7 @@ def process_run(uid,
                 draw_func_interp=None,
                 cloud_dispatcher=None,
                 dump_to_tiff=False,
-                heavyweight_processing=True,
+                heavyweight_processing=False,
                 processing_kwargs=None):
 
     get_tiled_nodes()
