@@ -43,7 +43,7 @@ def logger_info_decorator(function):
         try:
             result = function(*args, **kwargs)
             if LOGGER is not None:
-                LOGGER.info(f"{logger_msg}: beginning")
+                LOGGER.info(f"{logger_msg}: complete")
             return result
         except Exception as e:
             LOGGER.info(f"{logger_msg}: FAILED. Reason: {e}")
