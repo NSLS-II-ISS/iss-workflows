@@ -3,6 +3,7 @@ import pandas as pd
 from iss_workflows.quality import check_apb_quality, check_xs_quality
 from iss_workflows.xray import *
 from itertools import product
+from tqdm import tqdm
 
 _xs_ch_range = list(range(1, 5))
 _xs_roi_range = list(range(1, 5))
@@ -18,14 +19,35 @@ _external_detector_keys = _xs_ch_roi_keys + list(_xs_roi_combine_dict.keys()) + 
 #
 #     for c in arr_client
 
+def read_tiled_array_in_chunks(arr_client):
+    output = []
+    axis = [i for i, c in enumerate(arr_client.chunks) if len(c) > 1]
+    if len(axis) == 0:
+        axis = None
+    elif len(axis) == 1:
+        axis = axis[0]
+    else:
+        raise NotImplementedError('More general chunked-reading is not implemented yet ;-)')
+    chunk_indices = list(product(*[list(range(len(c))) for c in arr_client.chunks]))
+    if len(chunk_indices) == 1:
+        return arr_client.read()
+    else:
+        for chunk_index in chunk_indices:
+            output.append(arr_client.read_block(chunk_index))
+        return np.concatenate(output, axis=axis)
+
 
 def _load_dataset_from_tiled(run, stream_name, field_name=None):
+    msg = f'[Processing] Reading stream {stream_name}'
     if field_name is None:
-        t = run[stream_name]['data'][stream_name].read()
-        columns = list(t.dtype.fields.keys())
+        arr_client = run[stream_name]['data'][stream_name]
+        columns = list(arr_client.dtype.fields.keys())
     else:
-        t = run[stream_name]['data'][field_name].read()
+        arr_client = run[stream_name]['data'][field_name]
         columns = [field_name]
+        msg += f'/{field_name}'
+    print(msg)
+    t = read_tiled_array_in_chunks(arr_client)
     arr = np.array(t.tolist()).squeeze()
     return arr, columns
 
