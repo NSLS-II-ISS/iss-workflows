@@ -96,6 +96,7 @@ def read_fly_scan_streams(run, md, heavyweight_processing=True):
             apb_dict = translate_dataset(apb_df)
             raw_dict = {**raw_dict, **apb_dict}
             md['scan_quality'] = apb_quality_dict
+            LOGGER.info("APB stream reading complete")
 
         elif stream_name == 'pb9_enc1':
             energy_df = load_hhm_encoder_dataset_from_tiled(run)
